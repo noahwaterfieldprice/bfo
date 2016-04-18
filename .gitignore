@@ -1,0 +1,14 @@
+# IntelliJ project files
+.idea/
+
+# non-project directories
+original_files/
+notes/
+
+# distribution/packaging
+*.egg-info/
+
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
