@@ -1,4 +1,5 @@
 import numpy as np
+import numpy.ma as ma
 import matplotlib.pyplot as plt
 import matplotlib.mlab as mlab
 import scipy.ndimage as ndimage
@@ -29,7 +30,8 @@ class Experiment:
 
     def __repr__(self):
         short_data_folder = "/".join(self.data_folder.split("/")[-3:])
-        return "{0.__class__.__name__}('{0.experiment_number}', ...{1}, {0.sample})".format(self, short_data_folder)
+        return "Experiment('{0.experiment_number}', ...{1}, {0.sample})"\
+            .format(self, short_data_folder)
 
 
 class Scan:
@@ -145,29 +147,45 @@ class AverageScan(MultiScan):
 
 
 class ReciprocalSpaceMap(MultiScan):
-    def plot(self, h_offset=0, k_offset=0, l_offset=0, arrows=False,
-             vmin=0, vmax=40, axes=True, xlims=(-0.02, 0.02),
-             ylims=(-0.02, 0.02), add_colorbar=True, save=False,
-             title=False, h_point_density=200, k_point_density=200,
-             color_map=plt.cm.viridis, smoothing=None):
+    def interpolate(self, h_offset=0, k_offset=0, l_offset=0,
+                    h_point_density=200, k_point_density=200,
+                    smoothing_factor=None, rotation_angle=None):
 
         # extract hkl values and APD data
         hkl = self.hkl_values(h_offset, k_offset, l_offset)
-        h, k, l = hkl.T
+        if rotation_angle is None:
+            h, k, l = hkl.T
+        else:
+            h, k, l = rotate(hkl.T, rotation_angle)
         y = np.array([yi for scan in self.scans for yi in scan.data['APD']])
 
         # create interpolated hkl map
         hs = np.linspace(h.min(), h.max(), h_point_density)
         ks = np.linspace(k.min(), k.max(), k_point_density)
+        h_grid, k_grid = np.meshgrid(hs, ks)
         rs_map = mlab.griddata(h, k, y, hs, ks)
-        if smoothing is not None:
+        # add artificial noise to fill in blanks in grid
+        fake_noise = np.random.randint(0, 10, size=rs_map.shape)
+        rs_map[rs_map.mask] = fake_noise[rs_map.mask]
+        if smoothing_factor is not None:
             rs_map = ndimage.gaussian_filter(rs_map,
-                                             sigma=smoothing,
+                                             sigma=smoothing_factor,
                                              order=0)
 
+        return h_grid, k_grid, rs_map
+
+    def plot(self, h_offset=0, k_offset=0, l_offset=0, arrows=False,
+             vmin=0, vmax=40, axes=True, xlims=[-0.02, 0.02],
+             ylims=[-0.02, 0.02], add_colorbar=True, save=False,
+             title=False, h_point_density=200, k_point_density=200,
+             color_map=plt.cm.viridis, smoothing_factor=None):
+
+        h_grid, k_grid, rs_map = self.interpolate(h_offset, k_offset, l_offset,
+                                                  h_point_density, k_point_density,
+                                                  smoothing_factor)
         # plot map with eta scans superimposed
         fig, ax = plt.subplots()
-        h_grid, k_grid = np.meshgrid(hs, ks)
+
         a = ax.pcolor(
             h_grid, k_grid, rs_map, vmin=vmin, vmax=vmax, cmap=color_map)
         if add_colorbar:
@@ -194,14 +212,13 @@ class ReciprocalSpaceMap(MultiScan):
     def hkl_values(self, h_offset, k_offset, l_offset):
         """Extract hkl values of all scans and merge into 1D array of
         (h, k, l) vectors expressed in the cartesian basis."""
-        reciprocal_latttice = self.experiment.sample.lattice.reciprocal()
         hkl = []
         for scan in self.scans:
             hkl_list = (scan.data['h'] - h_offset,
                         scan.data['k'] - k_offset,
                         scan.data['l'] - l_offset)
             for hi, ki, li in zip(*hkl_list):
-                hkl.append(hex2cart(reciprocal_latttice.vector([hi, ki, li])))
+                hkl.append(hex2cart(np.array([hi, ki, li])))
         return np.array(hkl)
 
 
@@ -212,8 +229,8 @@ def rotate(vector, theta):
     """Rotate Cartesian vector by angle theta in the xy plane"""
     theta = np.radians(theta)
     rotation_matrix = np.array([[np.cos(theta), np.sin(theta), 0],
-                               [-np.sin(theta), np.cos(theta), 0],
-                               [0, 0, 1]])
+                                [-np.sin(theta), np.cos(theta), 0],
+                                [0, 0, 1]])
     return rotation_matrix.dot(vector)
 
 

@@ -4,23 +4,17 @@ from scipy.optimize import leastsq, curve_fit
 
 # General fitting functions
 
-def ls_fit(function, x_data, y_data, initial_parameters, fixed_parameters=[]):
+def ls_fit(function, x_data, y_data, initial_parameters):
     def residuals(parameters, x, y):
-        for i, p in fixed_parameters:
-            parameters[i] = p
         return y - function(x, *parameters)
 
-    fit_parameters, jacobian = leastsq(
-        residuals, initial_parameters, args=(x_data, y_data))
+    fit_parameters, jacobian, *_ = leastsq(
+        residuals, initial_parameters, args=(x_data, y_data), full_output=1)
 
     res_variance = (np.sum(residuals(fit_parameters, x_data, y_data) ** 2) /
                     (len(y_data) - len(initial_parameters)))
     covariance_matrix = jacobian * res_variance
     errors = np.absolute(covariance_matrix.diagonal()) ** 0.5
-
-    for i, p in fixed_parameters:
-        fit_parameters[i] = p
-        errors[i] = 0
 
     return fit_parameters, errors
 
