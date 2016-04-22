@@ -1,9 +1,10 @@
-from collections import namedtuple
-
 import numpy as np
 import matplotlib.pyplot as plt
-from mpl_toolkits.axes_grid1 import AxesGrid
+import matplotlib.mlab as mlab
+import scipy.ndimage as ndimage
+
 from matplotlib import style
+
 style.use('physics')
 
 color_dict = {
@@ -19,7 +20,16 @@ color_dict = {
     'dark_black': '#111111', 'light_black': '#454545',
 }
 
-Experiment = namedtuple('Experiment', 'experiment_number data_folder sample')
+
+class Experiment:
+    def __init__(self, experiment_number, data_folder, sample=None):
+        self.experiment_number = experiment_number
+        self.data_folder = data_folder
+        self.sample = sample
+
+    def __repr__(self):
+        short_data_folder = "/".join(self.data_folder.split("/")[-3:])
+        return "{0.__class__.__name__}('{0.experiment_number}', ...{1}, {0.sample})".format(self, short_data_folder)
 
 
 class Scan:
@@ -32,6 +42,9 @@ class Scan:
             experiment.data_folder, scan_number)
         self.metadata = self._import_metadata()
         self.data = self._import_data()
+
+    def __repr__(self):
+        return "{0.__class__.__name__}({0.scan_number}, {0.experiment})".format(self)
 
     def _metadata_rows(self):
         with open(self.filepath, 'r') as data_file:
@@ -88,23 +101,21 @@ class MultiScan:
                       for scan_number in scan_range]
         self.experiment = experiment
 
-
     def grid_plot(self, xval, yval, normalisation='ic1monitor', **plot_kwargs):
         no_scans = len(self.scans)
         nrows = int(np.floor(np.sqrt(no_scans)))
-        ncols = int(np.ceil(np.sqrt(no_scans)))
-        fig = plt.figure()
+        ncols = int(np.ceil(no_scans / nrows))
+        print(nrows, ncols)
+        ymax = max(max(scan.data[yval]) for scan in self.scans)
         for i, scan in enumerate(self.scans):
             x, y = scan.data[xval], scan.data[yval]
             plt.subplot(nrows, ncols, i + 1)
+            plt.ylim([0, ymax])
             plt.plot(x, y, **plot_kwargs)
         plt.show()
 
-    def plot(self, xval, yval, fig=None, normalisation='ic1monitor', **plot_kwargs):
-        if fig is None:
-            fig, ax = plt.subplots()
-        else:
-            ax = fig.get_axes()[0]
+    def plot(self, xval, yval, normalisation='ic1monitor', **plot_kwargs):
+        fig, ax = plt.subplots()
         for scan in self.scans:
             x, y = scan.data[xval], scan.data[yval]
             ax.plot(x, y, **plot_kwargs)
@@ -125,12 +136,90 @@ class AverageScan(MultiScan):
             yval_arrays.append(scan.data[yval])
         return np.array(yval_arrays).mean(axis=0)
 
-    def plot(self, xval, yval, fig=None, **plot_kwargs):
-        if fig is None:
-            fig, ax = plt.subplots()
-        else:
-            ax = fig.get_axes()[0]
+    def plot(self, xval, yval, **plot_kwargs):
+        fig, ax = plt.subplots()
         ax.plot(self.scans[0].data[xval], self.average(yval), **plot_kwargs)
         ax.set_xlabel(xval)
         ax.set_ylabel(yval)
         plt.show()
+
+
+class ReciprocalSpaceMap(MultiScan):
+    def plot(self, h_offset=0, k_offset=0, l_offset=0, arrows=False,
+             vmin=0, vmax=40, axes=True, xlims=(-0.02, 0.02),
+             ylims=(-0.02, 0.02), add_colorbar=True, save=False,
+             title=False, h_point_density=200, k_point_density=200,
+             color_map=plt.cm.viridis, smoothing=None):
+
+        # extract hkl values and APD data
+        hkl = self.hkl_values(h_offset, k_offset, l_offset)
+        h, k, l = hkl.T
+        y = np.array([yi for scan in self.scans for yi in scan.data['APD']])
+
+        # create interpolated hkl map
+        hs = np.linspace(h.min(), h.max(), h_point_density)
+        ks = np.linspace(k.min(), k.max(), k_point_density)
+        rs_map = mlab.griddata(h, k, y, hs, ks)
+        if smoothing is not None:
+            rs_map = ndimage.gaussian_filter(rs_map,
+                                             sigma=smoothing,
+                                             order=0)
+
+        # plot map with eta scans superimposed
+        fig, ax = plt.subplots()
+        h_grid, k_grid = np.meshgrid(hs, ks)
+        a = ax.pcolor(
+            h_grid, k_grid, rs_map, vmin=vmin, vmax=vmax, cmap=color_map)
+        if add_colorbar:
+            plt.colorbar(a).ax.tick_params(direction='out')
+        ax.scatter(0, 0, s=10)
+
+        # adjust axes
+        ax.set_xlim(xlims)
+        ax.set_ylim(ylims)
+        ax.set_xlabel('h')
+        ax.set_ylabel('k')
+        ax.get_xaxis().set_tick_params(direction='out')
+        ax.get_yaxis().set_tick_params(direction='out')
+        ax.set_title('First scan: {0}'.format(self.scan_range[0]))
+        if not axes:
+            plt.axis('off')
+
+        # adjust figure dimensions
+        xdim = (xlims[1] - xlims[0]) * 200
+        ydim = (ylims[1] - ylims[0]) * 200
+        fig.set_size_inches(xdim, ydim)
+        plt.show()
+
+    def hkl_values(self, h_offset, k_offset, l_offset):
+        rl = self.experiment.sample.lattice.reciprocal()
+        hkl = []
+        for scan in self.scans:
+            hkl_list = (scan.data['h'] - h_offset,
+                        scan.data['k'] - k_offset,
+                        scan.data['l'] - l_offset)
+            for hi, ki, li in zip(*hkl_list):
+                hkl.append(hex2cart(rl.vector([hi, ki, li])))
+        return np.array(hkl)
+
+
+# Utility functions
+
+
+def rotate(vector, theta):
+    theta = np.radians(theta)
+    rotation_matrix = np.array([[np.cos(theta), np.sin(theta), 0],
+                               [-np.sin(theta), np.cos(theta), 0],
+                               [0, 0, 1]])
+    return rotation_matrix.dot(vector)
+
+
+def hex2cart(point):
+    h, k, l = point
+    return h * np.cos(np.pi / 6), k + h * np.sin(np.pi / 6), l
+
+
+def xylims(x, y):
+    xlims = x.min(), x.max()
+    ylims = y.min(), y.max()
+    return xlims, ylims
