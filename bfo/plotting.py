@@ -192,14 +192,16 @@ class ReciprocalSpaceMap(MultiScan):
         plt.show()
 
     def hkl_values(self, h_offset, k_offset, l_offset):
-        rl = self.experiment.sample.lattice.reciprocal()
+        """Extract hkl values of all scans and merge into 1D array of
+        (h, k, l) vectors expressed in the cartesian basis."""
+        reciprocal_latttice = self.experiment.sample.lattice.reciprocal()
         hkl = []
         for scan in self.scans:
             hkl_list = (scan.data['h'] - h_offset,
                         scan.data['k'] - k_offset,
                         scan.data['l'] - l_offset)
             for hi, ki, li in zip(*hkl_list):
-                hkl.append(hex2cart(rl.vector([hi, ki, li])))
+                hkl.append(hex2cart(reciprocal_latttice.vector([hi, ki, li])))
         return np.array(hkl)
 
 
@@ -207,6 +209,7 @@ class ReciprocalSpaceMap(MultiScan):
 
 
 def rotate(vector, theta):
+    """Rotate Cartesian vector by angle theta in the xy plane"""
     theta = np.radians(theta)
     rotation_matrix = np.array([[np.cos(theta), np.sin(theta), 0],
                                [-np.sin(theta), np.cos(theta), 0],
@@ -215,6 +218,7 @@ def rotate(vector, theta):
 
 
 def hex2cart(point):
+    """Convert hexagonal point into Cartesian basis"""
     h, k, l = point
     return h * np.cos(np.pi / 6), k + h * np.sin(np.pi / 6), l
 

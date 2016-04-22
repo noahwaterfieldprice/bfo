@@ -4,7 +4,6 @@ from scipy.optimize import leastsq, curve_fit
 
 # General fitting functions
 
-
 def ls_fit(function, x_data, y_data, initial_parameters, fixed_parameters=[]):
     def residuals(parameters, x, y):
         for i, p in fixed_parameters:
@@ -17,45 +16,26 @@ def ls_fit(function, x_data, y_data, initial_parameters, fixed_parameters=[]):
     res_variance = (np.sum(residuals(fit_parameters, x_data, y_data) ** 2) /
                     (len(y_data) - len(initial_parameters)))
     covariance_matrix = jacobian * res_variance
-    errors = []
-    for i in range(len(initial_parameters)):
-        try:
-            errors.append(np.absolute(covariance_matrix[i][i]) ** 0.5)
-        except:
-            errors.append(0.00)
+    errors = np.absolute(covariance_matrix.diagonal()) ** 0.5
 
     for i, p in fixed_parameters:
         fit_parameters[i] = p
-    return fit_parameters, np.array(errors)
+        errors[i] = 0
+
+    return fit_parameters, errors
 
 
 def cf_fit(function, parameters, x_data, y_data, y_data_errors=None):
     # fit function and update parameters
     if y_data_errors is None:
-        pfit, pcov = \
-            curve_fit(function, x_data, y_data, p0=parameters)
+        fit_parameters, covariance_matrix = curve_fit(
+            function, x_data, y_data, p0=parameters)
     else:
-        pfit, pcov = \
-            curve_fit(function, x_data, y_data, p0=parameters,
-                      sigma=y_data_errors)
+        fit_parameters, covariance_matrix = curve_fit(
+            function, x_data, y_data, p0=parameters, sigma=y_data_errors)
     # calculate errors
-    errors = []
-    for i in range(len(pfit)):
-        try:
-            errors.append(np.absolute(pcov[i][i]) ** 0.5)
-        except:
-            errors.append(0.00)
-    # return errors
-    return pfit, np.array(errors)
-
-
-
-# Peak fitting functions
-
-def fit_peak(function, x_data, y_data, initial_parameters=None):
-    if initial_parameters is None:
-        initial_parameters = initialise_peak_parameters(x_data, y_data)
-    return ls_fit(function, x_data, y_data, initial_parameters)
+    errors = np.absolute(covariance_matrix.diagonal()) ** 0.5
+    return fit_parameters, errors
 
 
 def initialise_peak_parameters(x, y, constant=False):
@@ -63,8 +43,6 @@ def initialise_peak_parameters(x, y, constant=False):
     if constant:
         peak_parameters.append(0)
     return peak_parameters
-
-# Peak shape functions
 
 
 def gaussian(x, a, b, c):
